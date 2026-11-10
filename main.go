@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"time"
 )
 
@@ -24,11 +23,9 @@ func main() {
 
 	store := NewStore()
 	if *aofPath != "" {
-		f, err := os.OpenFile(*aofPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
+		if err := store.LoadAOF(*aofPath); err != nil {
 			log.Fatal(err)
 		}
-		store.aof = &AOF{f: f}
 	}
 	store.StartCleanup(time.Second)
 

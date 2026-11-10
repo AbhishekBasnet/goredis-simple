@@ -191,7 +191,7 @@ func (s *Store) expireAt(key string, t time.Time) []byte {
 		return appendInt(nil, 0)
 	}
 	var entry []string
-	if !s.now().Before(t) {
+	if !s.loading && !s.now().Before(t) {
 		s.remove(key)
 		entry = []string{"DEL", key}
 	} else {

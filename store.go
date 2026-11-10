@@ -14,7 +14,8 @@ type Store struct {
 	data    map[string]string
 	expires map[string]time.Time // only keys that have a deadline
 
-	aof *AOF // nil means no persistence
+	aof     *AOF // nil means no persistence
+	loading bool // true while the log is being replayed
 
 	now func() time.Time // replaced in tests
 }
@@ -45,7 +46,9 @@ func (s *Store) persist(cmds ...[]string) []byte {
 // live reports whether key exists. A key past its deadline is deleted on the
 // spot ("lazy" expiry), so no command ever sees an expired value.
 func (s *Store) live(key string) bool {
-	if t, ok := s.expires[key]; ok && !s.now().Before(t) {
+	// While replaying, nothing expires: the log already records every
+	// deletion that happened, and we must not decide differently now.
+	if t, ok := s.expires[key]; ok && !s.loading && !s.now().Before(t) {
 		s.remove(key)
 		// Log the deletion. Otherwise, replaying the log later would run
 		// commands against a key that had already expired at this point.
