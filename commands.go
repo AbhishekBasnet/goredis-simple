@@ -70,8 +70,16 @@ func (s *Store) Execute(args []string) []byte {
 		}
 		s.data[args[1]] = args[2]
 		delete(s.expires, args[1]) // a plain SET clears any old deadline
+		entries := [][]string{{"SET", args[1], args[2]}}
 		if ttl > 0 {
-			s.expires[args[1]] = s.now().Add(ttl)
+			deadline := s.now().Add(ttl)
+			s.expires[args[1]] = deadline
+			// The log stores the deadline as an absolute time. "EX 10" replayed
+			// tomorrow would otherwise give the key another 10 seconds.
+			entries = append(entries, []string{"PEXPIREAT", args[1], strconv.FormatInt(deadline.UnixMilli(), 10)})
+		}
+		if e := s.persist(entries...); e != nil {
+			return e
 		}
 		return appendSimple(nil, "OK")
 
@@ -93,6 +101,11 @@ func (s *Store) Execute(args []string) []byte {
 			if s.live(k) {
 				s.remove(k)
 				deleted++
+			}
+		}
+		if deleted > 0 {
+			if e := s.persist(args); e != nil {
+				return e
 			}
 		}
 		return appendInt(nil, deleted)
@@ -126,6 +139,9 @@ func (s *Store) Execute(args []string) []byte {
 		}
 		cur++
 		s.data[args[1]] = strconv.FormatInt(cur, 10) // keeps any deadline
+		if e := s.persist(args); e != nil {
+			return e
+		}
 		return appendInt(nil, cur)
 
 	case "EXPIRE":
@@ -174,10 +190,16 @@ func (s *Store) expireAt(key string, t time.Time) []byte {
 	if !s.live(key) {
 		return appendInt(nil, 0)
 	}
+	var entry []string
 	if !s.now().Before(t) {
 		s.remove(key)
+		entry = []string{"DEL", key}
 	} else {
 		s.expires[key] = t
+		entry = []string{"PEXPIREAT", key, strconv.FormatInt(t.UnixMilli(), 10)}
+	}
+	if e := s.persist(entry); e != nil {
+		return e
 	}
 	return appendInt(nil, 1)
 }

@@ -7,11 +7,13 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"time"
 )
 
 func main() {
 	addr := flag.String("addr", ":6380", "address to listen on")
+	aofPath := flag.String("aof", "appendonly.aof", "append-only file ('' to disable persistence)")
 	flag.Parse()
 
 	ln, err := net.Listen("tcp", *addr)
@@ -21,6 +23,13 @@ func main() {
 	log.Printf("listening on %s", ln.Addr())
 
 	store := NewStore()
+	if *aofPath != "" {
+		f, err := os.OpenFile(*aofPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		store.aof = &AOF{f: f}
+	}
 	store.StartCleanup(time.Second)
 
 	for {
