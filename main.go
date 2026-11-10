@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
@@ -20,6 +21,7 @@ func main() {
 	log.Printf("listening on %s", ln.Addr())
 
 	store := NewStore()
+	store.StartCleanup(time.Second)
 
 	for {
 		conn, err := ln.Accept()
