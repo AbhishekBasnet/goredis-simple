@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 )
 
 func main() {
@@ -20,6 +19,8 @@ func main() {
 	}
 	log.Printf("listening on %s", ln.Addr())
 
+	store := NewStore()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -27,12 +28,12 @@ func main() {
 			continue
 		}
 		// One goroutine per client, so a slow client never blocks the others.
-		go handle(conn)
+		go handle(conn, store)
 	}
 }
 
 // handle serves one client: read a command, run it, write the reply, repeat.
-func handle(conn net.Conn) {
+func handle(conn net.Conn, store *Store) {
 	defer conn.Close()
 	log.Printf("connected: %s", conn.RemoteAddr())
 	defer log.Printf("disconnected: %s", conn.RemoteAddr())
@@ -52,13 +53,7 @@ func handle(conn net.Conn) {
 			return
 		}
 
-		var reply []byte
-		switch strings.ToUpper(args[0]) {
-		case "PING":
-			reply = appendSimple(nil, "PONG")
-		default:
-			reply = appendError(nil, "ERR unknown command '"+args[0]+"'")
-		}
+		reply := store.Execute(args)
 		w.Write(reply)
 
 		// Pipelining: if the client already sent more commands, keep going
