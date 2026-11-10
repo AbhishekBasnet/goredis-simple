@@ -31,7 +31,7 @@ Plain `nc localhost 6380` works too: type `PING` and press enter.
 | Command | Notes |
 |---|---|
 | `PING [msg]`, `ECHO msg` | |
-| `SET key value [EX seconds \| PX milliseconds]` | A plain `SET` clears any existing expiry |
+| `SET key value [EX seconds \| PX milliseconds \| PXAT unix-ms]` | A plain `SET` clears any existing expiry |
 | `GET key` | |
 | `DEL key [key ...]`, `EXISTS key [key ...]` | Return how many keys were deleted / exist |
 | `INCR key` | Missing key counts as 0; keeps the key's expiry |
@@ -56,9 +56,9 @@ Command names are case-insensitive. Errors use the Redis wording, for example `E
 
 **Persistence.** Every command that changes data is appended to `appendonly.aof`, in the same format clients send, and the file is fsynced before the client gets its reply. On startup the file is run from the top against an empty store.
 
-- Deadlines are logged as absolute times (`PEXPIREAT`), not "10 seconds from now", so replaying later does not give a key extra life.
+- Deadlines are logged as absolute times (`SET ... PXAT` and `PEXPIREAT`), not "10 seconds from now", so replaying later does not give a key extra life. `SET` with an expiry is a single log entry, so a crash cannot keep the value and lose its deadline.
 - When a key expires, a `DEL` is logged, and replay does not expire anything on its own. That keeps the replayed history identical to what really happened.
-- If the server died halfway through writing the last command, that partial command was never acknowledged, so it is ignored and cut off the file. Corruption anywhere else makes the server refuse to start rather than guess.
+- If the server died halfway through writing the last command, that partial command was never acknowledged, so it is ignored and cut off the file. Anything else that does not parse, or that is not a valid command, makes the server refuse to start rather than guess.
 
 ## Limitations
 

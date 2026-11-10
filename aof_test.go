@@ -114,6 +114,37 @@ func TestCorruptLogIsRefused(t *testing.T) {
 	}
 }
 
+// Text that parses as a command but is not one we wrote must also be refused.
+func TestGarbageInLogIsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aof")
+	os.WriteFile(path, []byte("*3\r\n$3\r\nSET\r\n$1\r\na\r\n$1\r\n1\r\nthis is not a command\r\n"), 0o644)
+	if err := NewStore().LoadAOF(path); err == nil {
+		t.Fatal("expected an error for garbage in the log")
+	}
+}
+
+// SET with an expiry is one log entry. Wherever a crash cuts the log, the
+// key must never come back without its deadline.
+func TestCrashNeverDropsTheDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aof")
+	s := restart(t, path, nil)
+	run(s, "SET", "k", "v", "EX", "1000")
+	s.aof.Close()
+	full, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for cut := 0; cut < len(full); cut++ {
+		os.WriteFile(path, full[:cut], 0o644)
+		s2 := restart(t, path, nil)
+		if got := run(s2, "TTL", "k"); got == ":-1\r\n" {
+			t.Fatalf("log cut at byte %d: key came back with no deadline", cut)
+		}
+		s2.aof.Close()
+	}
+}
+
 // startServer runs the real TCP server on a random port.
 func startServer(t *testing.T, aofPath string) (addr string, stop func()) {
 	t.Helper()

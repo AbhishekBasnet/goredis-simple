@@ -27,8 +27,7 @@ func (a *AOF) Append(cmds ...[]string) error {
 	for _, c := range cmds {
 		buf = append(buf, encodeCommand(c)...)
 	}
-	// One Write call for the whole batch, so commands that belong together
-	// (like SET plus its expiry) are not split by a crash between two writes.
+	// One Write call and one fsync for the whole batch.
 	if _, err := a.f.Write(buf); err != nil {
 		return err
 	}
@@ -70,7 +69,11 @@ func (s *Store) LoadAOF(path string) error {
 		if err != nil {
 			return fmt.Errorf("append-only file is corrupt after byte %d: %w", good, err)
 		}
-		s.Execute(args)
+		// Only commands that succeeded were ever written to the log, so an
+		// error reply here means the file holds something we did not write.
+		if reply := s.Execute(args); reply[0] == '-' {
+			return fmt.Errorf("append-only file is corrupt after byte %d: command %q failed", good, args)
+		}
 		count++
 		good = len(data) - rd.Len() - br.Buffered()
 	}

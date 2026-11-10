@@ -9,6 +9,9 @@ import (
 const (
 	errNotInt = "ERR value is not an integer or out of range"
 	errSyntax = "ERR syntax error"
+
+	// maxExpire is the largest EX, PX or EXPIRE amount accepted.
+	maxExpire = 1 << 40
 )
 
 // Execute runs one command and returns the reply, already encoded as RESP.
@@ -46,39 +49,43 @@ func (s *Store) Execute(args []string) []byte {
 		return appendBulk(nil, args[1])
 
 	case "SET":
-		// SET key value [EX seconds | PX milliseconds]
+		// SET key value [EX seconds | PX milliseconds | PXAT unix-milliseconds]
 		if e := arity(n == 3 || n == 5); e != nil {
 			return e
 		}
-		var ttl time.Duration
+		var deadlineMs int64 // unix time in milliseconds; 0 means no deadline
 		if n == 5 {
 			amount, err := strconv.ParseInt(args[4], 10, 64)
 			if err != nil {
 				return appendError(nil, errNotInt)
 			}
-			if amount <= 0 || amount > 1<<40 {
+			option := strings.ToUpper(args[3])
+			if amount <= 0 || (option != "PXAT" && amount > maxExpire) {
 				return appendError(nil, "ERR invalid expire time in 'set' command")
 			}
-			switch strings.ToUpper(args[3]) {
+			switch option {
 			case "EX":
-				ttl = time.Duration(amount) * time.Second
+				deadlineMs = s.now().UnixMilli() + amount*1000
 			case "PX":
-				ttl = time.Duration(amount) * time.Millisecond
+				deadlineMs = s.now().UnixMilli() + amount
+			case "PXAT":
+				deadlineMs = amount
 			default:
 				return appendError(nil, errSyntax)
 			}
 		}
 		s.data[args[1]] = args[2]
 		delete(s.expires, args[1]) // a plain SET clears any old deadline
-		entries := [][]string{{"SET", args[1], args[2]}}
-		if ttl > 0 {
-			deadline := s.now().Add(ttl)
-			s.expires[args[1]] = deadline
+		entry := []string{"SET", args[1], args[2]}
+		if deadlineMs > 0 {
+			s.expires[args[1]] = time.UnixMilli(deadlineMs)
 			// The log stores the deadline as an absolute time. "EX 10" replayed
 			// tomorrow would otherwise give the key another 10 seconds.
-			entries = append(entries, []string{"PEXPIREAT", args[1], strconv.FormatInt(deadline.UnixMilli(), 10)})
+			// It goes in the same log entry as the value, so a crash can never
+			// leave the value in the log without its deadline.
+			entry = append(entry, "PXAT", strconv.FormatInt(deadlineMs, 10))
 		}
-		if e := s.persist(entries...); e != nil {
+		if e := s.persist(entry); e != nil {
 			return e
 		}
 		return appendSimple(nil, "OK")
@@ -150,10 +157,11 @@ func (s *Store) Execute(args []string) []byte {
 			return e
 		}
 		secs, err := strconv.ParseInt(args[2], 10, 64)
-		if err != nil || secs > 1<<40 || secs < -(1<<40) {
+		if err != nil || secs > maxExpire || secs < -maxExpire {
 			return appendError(nil, errNotInt)
 		}
-		return s.expireAt(args[1], s.now().Add(time.Duration(secs)*time.Second))
+		// Worked out in milliseconds: a time.Duration cannot hold that many seconds.
+		return s.expireAt(args[1], time.UnixMilli(s.now().UnixMilli()+secs*1000))
 
 	case "PEXPIREAT":
 		// PEXPIREAT key unix-milliseconds
@@ -177,8 +185,8 @@ func (s *Store) Execute(args []string) []byte {
 		if !ok {
 			return appendInt(nil, -1) // key has no deadline
 		}
-		left := t.Sub(s.now())
-		return appendInt(nil, int64((left+500*time.Millisecond)/time.Second)) // rounded
+		leftMs := t.UnixMilli() - s.now().UnixMilli()
+		return appendInt(nil, (leftMs+500)/1000) // rounded to the nearest second
 	}
 
 	return appendError(nil, "ERR unknown command '"+args[0]+"'")
