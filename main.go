@@ -29,9 +29,17 @@ func main() {
 	}
 	store.StartCleanup(time.Second)
 
+	serve(ln, store)
+}
+
+// serve accepts clients until the listener is closed.
+func serve(ln net.Listener, store *Store) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			log.Printf("accept: %v", err)
 			continue
 		}
