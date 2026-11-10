@@ -2,7 +2,7 @@
 
 A small Redis-compatible server written in Go using only the standard library. It speaks the Redis wire protocol (RESP), so `redis-cli` and normal Redis client libraries can talk to it. It keeps strings in memory, supports key expiry, and writes every change to a file so data survives a restart.
 
-About 500 lines of code, one package.
+About 600 lines of code (without tests), one package.
 
 ## Run it
 
